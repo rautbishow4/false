@@ -3,7 +3,7 @@ from supabase import create_client
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="Parking Entry",
+    page_title="False Parking Earnings",
     layout="centered"
 )
 
@@ -13,81 +13,106 @@ supabase = create_client(
     st.secrets["SUPABASE_KEY"]
 )
 
-# ---------------- SESSION STATE ----------------
+# ---------------- SESSION STATES ----------------
 if "confirm_add" not in st.session_state:
     st.session_state.confirm_add = False
 
-if "vehicle_temp" not in st.session_state:
-    st.session_state.vehicle_temp = ""
+if "confirm_delete" not in st.session_state:
+    st.session_state.confirm_delete = None
 
-# ---------------- UI ----------------
-st.title("🚗 Parking Entry System")
+# ---------------- HEADER ----------------
+st.title("💶 False Parking Earnings Tracker")
+st.caption("Personal • Cloud stored • Long-term")
 
-vehicle = st.text_input(
-    "Vehicle Number",
-    placeholder="e.g. BA-2-PA-1234"
+st.divider()
+
+# ---------------- SUMMARY ----------------
+data = supabase.table("earnings").select("amount").execute()
+rows = data.data if data.data else []
+
+total_entries = len(rows)
+total_amount = sum(row["amount"] for row in rows)
+
+col1, col2 = st.columns(2)
+col1.metric("Total Tasks", total_entries)
+col2.metric("Total Earned", f"€{total_amount}")
+
+st.divider()
+
+# ---------------- ADD ENTRY ----------------
+st.subheader("➕ Add New Task")
+
+amount = st.radio(
+    "Earnings",
+    [10, 5],
+    format_func=lambda x: f"€{x}",
+    horizontal=True
 )
 
-# ---------------- ADD BUTTON ----------------
-if st.button("➕ Add Entry", use_container_width=True):
-    if vehicle.strip() == "":
-        st.warning("Please enter a vehicle number")
-    else:
-        st.session_state.confirm_add = True
-        st.session_state.vehicle_temp = vehicle
+remarks = st.text_input("Remarks (optional)")
 
-# ---------------- CONFIRMATION ----------------
+if st.button("Save Entry", use_container_width=True):
+    st.session_state.confirm_add = True
+
 if st.session_state.confirm_add:
-    st.warning(f"Are you sure you want to add **{st.session_state.vehicle_temp}**?")
+    st.warning(f"Are you sure you want to add €{amount}?")
 
-    col1, col2 = st.columns(2)
+    col_yes, col_no = st.columns(2)
 
-    with col1:
-        if st.button("✅ Yes", use_container_width=True):
-            supabase.table("parking_entries").insert({
-                "vehicle_number": st.session_state.vehicle_temp
-            }).execute()
+    if col_yes.button("✅ Yes"):
+        supabase.table("earnings").insert({
+            "amount": amount,
+            "remarks": remarks
+        }).execute()
 
-            st.success("Entry saved successfully")
-            st.session_state.confirm_add = False
-            st.session_state.vehicle_temp = ""
-            st.rerun()
+        st.session_state.confirm_add = False
+        st.success("Entry saved permanently ✅")
+        st.rerun()
 
-    with col2:
-        if st.button("❌ No", use_container_width=True):
-            st.session_state.confirm_add = False
-            st.session_state.vehicle_temp = ""
-            st.info("Entry cancelled")
+    if col_no.button("❌ Cancel"):
+        st.session_state.confirm_add = False
+        st.info("Cancelled")
 
-# ---------------- DATA ----------------
 st.divider()
-st.subheader("📋 Current Entries")
 
-response = supabase.table("parking_entries") \
+# ---------------- HISTORY ----------------
+st.subheader("📋 Earnings History")
+
+history = supabase.table("earnings") \
     .select("*") \
     .order("created_at", desc=True) \
     .execute()
 
-rows = response.data
+records = history.data
 
-if rows:
-    st.markdown(f"### 🔢 Total Vehicles: **{len(rows)}**")
+if records:
+    for row in records:
+        st.markdown(f"**💰 €{row['amount']}**")
+        st.caption(row["remarks"] if row["remarks"] else "No remarks")
+        st.caption(row["created_at"])
 
-    for row in rows:
-        with st.container():
-            col1, col2 = st.columns([4, 1])
+        if st.session_state.confirm_delete == row["id"]:
+            col1, col2 = st.columns(2)
 
-            col1.markdown(
-                f"**{row['vehicle_number']}**  \n"
-                f"🕒 {row['created_at']}"
-            )
-
-            if col2.button("🗑", key=row["id"]):
-                supabase.table("parking_entries") \
+            if col1.button("✅ Yes, delete", key=f"yes_{row['id']}"):
+                supabase.table("earnings") \
                     .delete() \
                     .eq("id", row["id"]) \
                     .execute()
-                st.rerun()
-else:
-    st.info("No entries yet")
 
+                st.session_state.confirm_delete = None
+                st.warning("Entry deleted")
+                st.rerun()
+
+            if col2.button("❌ No", key=f"no_{row['id']}"):
+                st.session_state.confirm_delete = None
+                st.info("Deletion cancelled")
+                st.rerun()
+        else:
+            if st.button("🗑 Delete", key=f"del_{row['id']}"):
+                st.session_state.confirm_delete = row["id"]
+                st.rerun()
+
+        st.divider()
+else:
+    st.info("No earnings recorded yet.")
