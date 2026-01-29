@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime
+import os
 
 # ---------------- Page Config ----------------
 st.set_page_config(
@@ -8,23 +9,27 @@ st.set_page_config(
     layout="centered"
 )
 
-# ---------------- Database ----------------
-conn = sqlite3.connect("earnings.db", check_same_thread=False)
+# ---------------- Google Drive Persistent DB ----------------
+DB_PATH = r"G:\My Drive\false\data\earnings.db"
+
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    amount INTEGER,
+    amount INTEGER NOT NULL,
     remarks TEXT,
-    created_at TEXT
+    created_at TEXT NOT NULL
 )
 """)
 conn.commit()
 
 # ---------------- Header ----------------
 st.title("💶 Earnings Tracker")
-st.caption("Personal • Offline • Mobile friendly")
+st.caption("Personal • Mobile friendly • Auto-synced to Google Drive")
 
 st.divider()
 
@@ -46,7 +51,7 @@ st.divider()
 # ---------------- Add Entry ----------------
 st.subheader("➕ Add Entry")
 
-choice = st.radio(
+amount = st.radio(
     "Amount earned",
     [10, 5],
     format_func=lambda x: f"€{x}",
@@ -56,18 +61,22 @@ choice = st.radio(
 remarks = st.text_input("Remarks (optional)")
 
 if st.button("Save Entry", use_container_width=True):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute(
         "INSERT INTO entries (amount, remarks, created_at) VALUES (?, ?, ?)",
-        (choice, remarks, now)
+        (amount, remarks, timestamp)
     )
     conn.commit()
-    st.success("Entry saved ✅")
+    st.success("Entry saved & synced ✅")
     st.rerun()
 
 st.divider()
 
-# ---------------- History + Delete ----------------
+# ---------------- Delete Confirmation State ----------------
+if "confirm_delete" not in st.session_state:
+    st.session_state.confirm_delete = None
+
+# ---------------- History ----------------
 st.subheader("📋 History")
 
 rows = cursor.execute(
@@ -80,12 +89,27 @@ if rows:
         st.caption(remarks if remarks else "No remarks")
         st.caption(ts)
 
-        if st.button("❌ Delete", key=f"del_{entry_id}"):
-            cursor.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
-            conn.commit()
-            st.warning("Entry deleted")
-            st.rerun()
+        if st.session_state.confirm_delete == entry_id:
+            col_yes, col_no = st.columns(2)
+
+            if col_yes.button("✅ Yes, delete", key=f"yes_{entry_id}"):
+                cursor.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+                conn.commit()
+                st.session_state.confirm_delete = None
+                st.warning("Entry deleted")
+                st.rerun()
+
+            if col_no.button("❌ No, keep", key=f"no_{entry_id}"):
+                st.session_state.confirm_delete = None
+                st.info("Deletion cancelled")
+                st.rerun()
+        else:
+            if st.button("❌ Delete", key=f"del_{entry_id}"):
+                st.session_state.confirm_delete = entry_id
+                st.rerun()
 
         st.divider()
 else:
     st.info("No entries yet.")
+
+
