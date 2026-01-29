@@ -1,115 +1,93 @@
 import streamlit as st
-import sqlite3
-from datetime import datetime
-import os
+from supabase import create_client
 
-# ---------------- Page Config ----------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="Earnings Tracker",
+    page_title="Parking Entry",
     layout="centered"
 )
 
-# ---------------- Google Drive Persistent DB ----------------
-DB_PATH = r"G:\My Drive\false\data\earnings.db"
-
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    amount INTEGER NOT NULL,
-    remarks TEXT,
-    created_at TEXT NOT NULL
-)
-""")
-conn.commit()
-
-# ---------------- Header ----------------
-st.title("💶 Earnings Tracker")
-st.caption("Personal • Mobile friendly • Auto-synced to Google Drive")
-
-st.divider()
-
-# ---------------- Summary ----------------
-total_entries = cursor.execute(
-    "SELECT COUNT(*) FROM entries"
-).fetchone()[0]
-
-total_amount = cursor.execute(
-    "SELECT COALESCE(SUM(amount), 0) FROM entries"
-).fetchone()[0]
-
-col1, col2 = st.columns(2)
-col1.metric("Total Entries", total_entries)
-col2.metric("Total € Earned", f"€{total_amount}")
-
-st.divider()
-
-# ---------------- Add Entry ----------------
-st.subheader("➕ Add Entry")
-
-amount = st.radio(
-    "Amount earned",
-    [10, 5],
-    format_func=lambda x: f"€{x}",
-    horizontal=True
+# ---------------- SUPABASE ----------------
+supabase = create_client(
+    st.secrets["SUPABASE_URL"],
+    st.secrets["SUPABASE_KEY"]
 )
 
-remarks = st.text_input("Remarks (optional)")
+# ---------------- SESSION STATE ----------------
+if "confirm_add" not in st.session_state:
+    st.session_state.confirm_add = False
 
-if st.button("Save Entry", use_container_width=True):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cursor.execute(
-        "INSERT INTO entries (amount, remarks, created_at) VALUES (?, ?, ?)",
-        (amount, remarks, timestamp)
-    )
-    conn.commit()
-    st.success("Entry saved & synced ✅")
-    st.rerun()
+if "vehicle_temp" not in st.session_state:
+    st.session_state.vehicle_temp = ""
 
+# ---------------- UI ----------------
+st.title("🚗 Parking Entry System")
+
+vehicle = st.text_input(
+    "Vehicle Number",
+    placeholder="e.g. BA-2-PA-1234"
+)
+
+# ---------------- ADD BUTTON ----------------
+if st.button("➕ Add Entry", use_container_width=True):
+    if vehicle.strip() == "":
+        st.warning("Please enter a vehicle number")
+    else:
+        st.session_state.confirm_add = True
+        st.session_state.vehicle_temp = vehicle
+
+# ---------------- CONFIRMATION ----------------
+if st.session_state.confirm_add:
+    st.warning(f"Are you sure you want to add **{st.session_state.vehicle_temp}**?")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("✅ Yes", use_container_width=True):
+            supabase.table("parking_entries").insert({
+                "vehicle_number": st.session_state.vehicle_temp
+            }).execute()
+
+            st.success("Entry saved successfully")
+            st.session_state.confirm_add = False
+            st.session_state.vehicle_temp = ""
+            st.rerun()
+
+    with col2:
+        if st.button("❌ No", use_container_width=True):
+            st.session_state.confirm_add = False
+            st.session_state.vehicle_temp = ""
+            st.info("Entry cancelled")
+
+# ---------------- DATA ----------------
 st.divider()
+st.subheader("📋 Current Entries")
 
-# ---------------- Delete Confirmation State ----------------
-if "confirm_delete" not in st.session_state:
-    st.session_state.confirm_delete = None
+response = supabase.table("parking_entries") \
+    .select("*") \
+    .order("created_at", desc=True) \
+    .execute()
 
-# ---------------- History ----------------
-st.subheader("📋 History")
-
-rows = cursor.execute(
-    "SELECT id, amount, remarks, created_at FROM entries ORDER BY created_at DESC"
-).fetchall()
+rows = response.data
 
 if rows:
-    for entry_id, amount, remarks, ts in rows:
-        st.write(f"💰 **€{amount}**")
-        st.caption(remarks if remarks else "No remarks")
-        st.caption(ts)
+    st.markdown(f"### 🔢 Total Vehicles: **{len(rows)}**")
 
-        if st.session_state.confirm_delete == entry_id:
-            col_yes, col_no = st.columns(2)
+    for row in rows:
+        with st.container():
+            col1, col2 = st.columns([4, 1])
 
-            if col_yes.button("✅ Yes, delete", key=f"yes_{entry_id}"):
-                cursor.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
-                conn.commit()
-                st.session_state.confirm_delete = None
-                st.warning("Entry deleted")
+            col1.markdown(
+                f"**{row['vehicle_number']}**  \n"
+                f"🕒 {row['created_at']}"
+            )
+
+            if col2.button("🗑", key=row["id"]):
+                supabase.table("parking_entries") \
+                    .delete() \
+                    .eq("id", row["id"]) \
+                    .execute()
                 st.rerun()
-
-            if col_no.button("❌ No, keep", key=f"no_{entry_id}"):
-                st.session_state.confirm_delete = None
-                st.info("Deletion cancelled")
-                st.rerun()
-        else:
-            if st.button("❌ Delete", key=f"del_{entry_id}"):
-                st.session_state.confirm_delete = entry_id
-                st.rerun()
-
-        st.divider()
 else:
-    st.info("No entries yet.")
-
+    st.info("No entries yet")
 
