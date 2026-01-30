@@ -21,8 +21,7 @@ if "confirm_delete" not in st.session_state:
     st.session_state.confirm_delete = None
 
 # ---------------- HEADER ----------------
-st.title("💶 False Parking Earnings Tracker")
-st.caption("Personal • Cloud stored • Long-term")
+st.title("💶 Earnings Tracker")
 
 st.divider()
 
@@ -116,3 +115,4 @@ if records:
         st.divider()
 else:
     st.info("No earnings recorded yet.")
+
